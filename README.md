@@ -42,11 +42,6 @@ cd Pump.Fun-Sniper-Bot
 python3 PumpFunBot.py --min 0.1 --private-key "your_private_key" --max-coins 5 --slippage 5 --priority-fee 0.002 --sell-percentage 60
 ```
 
-### Seed Phrase Example
-```bash
-python3 PumpFunBot.py --min 0.2 --seed-phrase "word1 word2 word3 ... word12" --max-coins 3 --slippage 10 --priority-fee 0.003 --sell-percentage 50
-```
-
 ### Explanation of Parameters:
 - `--min`: Minimum SOL to allocate for each token purchase.
 - `--private-key`: Use your private key to access your wallet.
