@@ -50,7 +50,6 @@ python3 PumpFunBot.py --min 0.1 --private-key "your_private_key" --max-coins 5 -
 ### Explanation of Parameters:
 - `--min`: Minimum SOL to allocate for each token purchase.
 - `--private-key`: Use your private key to access your wallet.
-- `--seed-phrase`: Use your seed phrase to access your wallet.
 - `--max-coins`: Limit the number of tokens to buy (default is 3).
 - `--slippage`: Percentage slippage tolerance for transactions.
 - `--priority-fee`: Additional fee (in SOL) to prioritize transactions.
