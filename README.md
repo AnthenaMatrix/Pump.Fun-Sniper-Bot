@@ -38,7 +38,6 @@ pip install -r requirements.txt
 
 ### Step 3: Set Up Your Wallet
 1. **Private Key:** Copy your wallet's private key.
-2. **Seed Phrase:** Alternatively, use your wallet's seed phrase (12, 18, or 24 words).
 
 ## 🛠️ Usage
 
