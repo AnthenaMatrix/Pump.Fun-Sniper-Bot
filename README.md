@@ -46,6 +46,11 @@ pip install -r requirements.txt
 python3 PumpFunBot.py --min 0.1 --private-key "your_private_key" --max-coins 5 --slippage 5 --priority-fee 0.002 --sell-percentage 60
 ```
 
+### Terminal Run Example (replace private key with yours)
+```bash
+python3 PumpFunBot.py --min 0.1 --private-key "4Thfg6WMehuzYeGVQCNJB24x38Yxt5bSL6DkAPEd7J82" --max-coins 5 --slippage 9 --priority-fee 0.005 --sell-percentage 50
+```
+
 ### Explanation of Parameters:
 - `--min`: Minimum SOL to allocate for each token purchase.
 - `--private-key`: Use your private key to access your wallet.
